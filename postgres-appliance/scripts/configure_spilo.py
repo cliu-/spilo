@@ -475,8 +475,10 @@ def get_dcs_config(config, placeholders):
         config = {'exhibitor': {'hosts': yaml.load(placeholders['EXHIBITOR_HOSTS']),
                                 'port': placeholders['EXHIBITOR_PORT']}}
     elif 'ETCD_HOST' in placeholders:
+        logging.info("ETCD_HOST is found, set etcd.host=" + str(placeholders['ETCD_HOST']))
         config = {'etcd': {'host': placeholders['ETCD_HOST']}}
     elif 'ETCD_DISCOVERY_DOMAIN' in placeholders:
+        logging.info("ETCD_DISCOVERY_DOMAIN is found, set etcd.discovery_srv=" + str(placeholders['ETCD_DISCOVERY_DOMAIN']))
         config = {'etcd': {'discovery_srv': placeholders['ETCD_DISCOVERY_DOMAIN']}}
     else:
         config = {}  # Configuration can also be specified using either SPILO_CONFIGURATION or PATRONI_CONFIGURATION
@@ -656,7 +658,7 @@ def main():
     debug = os.environ.get('DEBUG', '') in ['1', 'true', 'on', 'ON']
     args = parse_args()
 
-    logging.basicConfig(format='%(asctime)s - bootstrapping - %(levelname)s - %(message)s', level=('DEBUG'
+    logging.basicConfig(format='%(asctime)s - bootstrapping(config_spilo.py) - %(levelname)s - %(message)s', level=('DEBUG'
                         if debug else (args.get('loglevel') or 'INFO').upper()))
 
     if os.environ.get('PATRONIVERSION') < '1.0':
@@ -729,6 +731,7 @@ def main():
             write_bootstrap_configuration(placeholders, provider, args['force'])
         else:
             raise Exception('Unknown section: {}'.format(section))
+        logging.info('End configuring {}'.format(section))
 
     # We will abuse non zero exit code as an indicator for the launch.sh that it should not even try to create a backup
     sys.exit(int(not placeholders['USE_WALE']))

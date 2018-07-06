@@ -1,67 +1,18 @@
 FROM ubuntu:18.04
+# This docker image only support postgres 10
 
-MAINTAINER Alexander Kukushkin <alexander.kukushkin@zalando.de>
+MAINTAINER LeapDevOps <leapdevops@opentext.com>
 
-ARG DEMO=false
+ARG DEBUG=false
+ENV DEBUG=$DEBUG
+
+ARG DEMO=true
 ENV DEMO=$DEMO
 
-RUN export DEBIAN_FRONTEND=noninteractive \
-    && echo 'APT::Install-Recommends "0";' > /etc/apt/apt.conf.d/01norecommend \
-    && echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/01norecommend \
-
-    && apt-get update \
-    && apt-get upgrade -y \
-
-    && apt-get install -y curl ca-certificates less locales jq vim-tiny gnupg1 \
-
-    && if [ "$DEMO" != "true" ]; then \
-        apt-get install -y cron \
-                # Required for wal-e
-                pv lzop \
-
-        # install etcdctl
-        && ETCDVERSION=2.3.8 \
-        && curl -L https://github.com/coreos/etcd/releases/download/v${ETCDVERSION}/etcd-v${ETCDVERSION}-linux-amd64.tar.gz \
-                | tar xz -C /bin --strip=1 --wildcards --no-anchored etcdctl etcd; \
-    fi \
-
-    ## Make sure we have a en_US.UTF-8 locale available
-    && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8 \
-
-    # Add PGDG repositories
-    && DISTRIB_CODENAME=$(sed -n 's/DISTRIB_CODENAME=//p' /etc/lsb-release) \
-    && echo "deb http://apt.postgresql.org/pub/repos/apt/ ${DISTRIB_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-    && echo "deb-src http://apt.postgresql.org/pub/repos/apt/ ${DISTRIB_CODENAME}-pgdg main" >> /etc/apt/sources.list.d/pgdg.list \
-    && curl -s -o - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - \
-
-    && apt-get update \
-    && apt-get install -y postgresql-common \
-
-    # forbid creation of a main cluster when package is installed
-    && sed -ri 's/#(create_main_cluster) .*$/\1 = false/' /etc/postgresql-common/createcluster.conf \
-
-    # Clean up
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-            /var/cache/debconf/* \
-            /usr/share/doc \
-            /usr/share/man \
-            /usr/share/locale/?? \
-            /usr/share/locale/??_?? \
-    && find /var/log -type f -exec truncate --size 0 {} \; \
-    && find /usr/share/i18n/charmaps/ -type f ! -name UTF-8.gz -delete \
-    && find /usr/share/i18n/locales/ -type f ! -name en_US -delete \
-    && echo 'en_US.UTF-8 UTF-8' > /usr/share/i18n/SUPPORTED
-
-ADD dependencies/debs /builddeps
-
 ARG WITH_PERL=false
-ARG PGOLDVERSIONS="9.3 9.4 9.5 9.6"
 ARG PGVERSION="10"
 
-# Install PostgreSQL, extensions and contribs
 ENV PGVERSION="$PGVERSION" \
-    PGOLDVERSIONS="$PGOLDVERSIONS" \
     POSTGIS_VERSION=2.4 \
     BG_MON_COMMIT=78f34bebd51108810ede18c7403f34f90e6be18c \
     DECODERBUFS_COMMIT=e2da72713909d4315aa63f46819412ec4f9f6a42 \
@@ -71,15 +22,71 @@ ENV PGVERSION="$PGVERSION" \
     TIMESCALEDB=0.9.2 \
     PAM_OAUTH2=v1.0
 
-RUN export DEBIAN_FRONTEND=noninteractive \
+ENV PATRONIVERSION=1.4.5
+ENV WALE_VERSION=1.1.0
+
+RUN echo "Prepare all installations and OS configurations..." \
+    && export DEBIAN_FRONTEND=noninteractive \
     && set -ex \
+    && echo 'APT::Install-Recommends "0";' > /etc/apt/apt.conf.d/01norecommend \
+    && echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/01norecommend \
     && apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y curl ca-certificates less locales jq vim-tiny gnupg1 \
+
+    && echo "Add PGDG repositories" \
+    && DISTRIB_CODENAME=$(sed -n 's/DISTRIB_CODENAME=//p' /etc/lsb-release) \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt/ ${DISTRIB_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && echo "deb-src http://apt.postgresql.org/pub/repos/apt/ ${DISTRIB_CODENAME}-pgdg main" >> /etc/apt/sources.list.d/pgdg.list \
+    && curl -s -o - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - \
+    && sed -i "s/ main.*$/ main ${PGVERSION}/g" /etc/apt/sources.list.d/pgdg.list \
+    
+
+    && echo "Make sure we have a en_US.UTF-8 locale available" \
+    && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8 \
+
+    && if [ "$DEMO" != "true" ]; then \
+        echo "Installing cron, (pv, lzop, which are required for wal-e.)" \
+        && apt-get install -qq -y cron \
+                # Required for wal-e
+                pv lzop \
+
+        && echo "install etcdctl" \
+        && ETCDVERSION=2.3.8 \
+        && curl -L https://github.com/coreos/etcd/releases/download/v${ETCDVERSION}/etcd-v${ETCDVERSION}-linux-amd64.tar.gz \
+                | tar xz -C /bin --strip=1 --wildcards --no-anchored etcdctl etcd; \
+    fi \
+
+    && apt-get update \
+    && apt-get install -y postgresql-common \
+
+    && echo "forbid creation of a main cluster when package is installed" \
+    && sed -ri 's/#(create_main_cluster) .*$/\1 = false/' /etc/postgresql-common/createcluster.conf \
+
+    && echo "Clean up" \
+    && apt-get -qq clean \
+    && rm -rf /var/lib/apt/lists/* \
+            /var/cache/debconf/* \
+            /usr/share/doc \
+            /usr/share/man \
+            /usr/share/locale/?? \
+            /usr/share/locale/??_?? \
+    && find /var/log -type f -exec truncate --size 0 {} \; \
+    && find /usr/share/i18n/charmaps/ -type f ! -name UTF-8.gz -delete \
+    && find /usr/share/i18n/locales/ -type f ! -name en_US -delete \
+    && echo 'en_US.UTF-8 UTF-8' > /usr/share/i18n/SUPPORTED;
+
+ADD dependencies/debs /builddeps
+
+RUN echo "Install postgresql, extentions and contribs..." \
+    && export DEBIAN_FRONTEND=noninteractive \
+    && set -ex \
+    && apt-get -qq update \
     && cd /builddeps \
 
     && BUILD_PACKAGES="devscripts build-essential fakeroot debhelper git gcc libc6-dev make libevent-dev" \
     && if [ "$DEMO" = "true" ]; then \
-        PGOLDVERSIONS="" \
-        && apt-get install -y $BUILD_PACKAGES; \
+        apt-get install -y $BUILD_PACKAGES; \
     else \
         BUILD_PACKAGES="$BUILD_PACKAGES equivs pgxnclient cmake libssl-dev zlib1g-dev libprotobuf-c-dev liblwgeom-dev libproj-dev libxslt1-dev libxml2-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev libcurl4-openssl-dev libc-ares-dev python-docutils flex bison asciidoc liblua5.1-dev libv8-dev markdown" \
 # debezium-decoderbufs: libprotobuf-c-dev liblwgeom-dev libproj-dev
@@ -87,7 +94,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 # pg_rewind: libxslt1-dev libxml2-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev
 # plv8: libv8-dev markdown
 
-        && apt-get install -y $BUILD_PACKAGES libprotobuf-c1 libcurl4 \
+        && apt-get install -y -qq $BUILD_PACKAGES libprotobuf-c1 libcurl4 \
 
         && if [ "$WITH_PERL" != "true" ]; then \
             version=$(apt-cache show perl | sed -n 's/^Version: //p' | sort -rV | head -n 1) \
@@ -119,79 +126,66 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 
     && apt-get install -y libevent-2.1 libevent-pthreads-2.1 python3.6 \
 
-    && for version in ${PGOLDVERSIONS} ${PGVERSION}; do \
-            sed -i "s/ main.*$/ main $version/g" /etc/apt/sources.list.d/pgdg.list \
-            && apt-get update \
+    && version=${PGVERSION} \
+    && EXTRAS="postgresql-${version}-cron" \
+    && if [ "$DEMO" != "true" ]; then \
+        EXTRAS="postgresql-pltcl-${version} \
+                postgresql-${version}-hypopg \
+                postgresql-${version}-pgq3 \
+                postgresql-${version}-pldebugger \
+                postgresql-${version}-pllua \
+                postgresql-${version}-plproxy \
+                postgresql-${version}-postgis-${POSTGIS_VERSION} \
+                postgresql-${version}-postgis-${POSTGIS_VERSION}-scripts \
+                postgresql-${version}-repack" \
+        # Only for pg version greater than 9.3
+        && EXTRAS="$EXTRAS postgresql-${version}-amcheck postgresql-${version}-pglogical postgresql-${version}-wal2json" \
+        # Only for pg version greater than 9.4
+        && EXTRAS="$EXTRAS postgresql-${version}-pgl-ddl-deploy postgresql-${version}-cron" \
+        # postgresql-${version}-plv8 -- rebuild package
+        && if [ "$WITH_PERL" = "true" ]; then \
+            EXTRAS="$EXTRAS postgresql-plperl-${version}"; \
+        fi; \
+    fi \
 
-            && if [ "$DEMO" != "true" ]; then \
-                EXTRAS="postgresql-pltcl-${version} \
-                        postgresql-${version}-hypopg \
-                        postgresql-${version}-pgq3 \
-                        postgresql-${version}-pldebugger \
-                        postgresql-${version}-pllua \
-                        postgresql-${version}-plproxy \
-                        postgresql-${version}-postgis-${POSTGIS_VERSION} \
-                        postgresql-${version}-postgis-${POSTGIS_VERSION}-scripts \
-                        postgresql-${version}-repack" \
-                # postgresql-${version}-plv8 -- rebuild package
-                && if [ "$WITH_PERL" = "true" ]; then \
-                    EXTRAS="$EXTRAS postgresql-plperl-${version}"; \
-                fi \
-                && if [ $version != "9.3" ]; then \
-                    EXTRAS="$EXTRAS postgresql-${version}-amcheck postgresql-${version}-pglogical postgresql-${version}-wal2json" \
-                    # postgresql-${version}-partman -- rebuild packages
-                    && if [ $version != "9.4" ]; then \
-                        EXTRAS="$EXTRAS postgresql-${version}-pgl-ddl-deploy"; \
-                    fi; \
-                fi; \
-            fi \
+    && echo "Install PostgreSQL binaries, contrib, plproxy and multiple pl's" \
+    && apt-get install --allow-downgrades -y postgresql-contrib-${version} \
+                postgresql-plpython3-${version} libpq5=$version* $EXTRAS \
+                libpq-dev=$version* postgresql-server-dev-${version} \
 
-            && if [ $version != "9.3" ] && [ $version != "9.4" ]; then \
-                EXTRAS="$EXTRAS postgresql-${version}-cron"; \
-            fi \
+    # Install 3rd party stuff
+    && if [ "$DEMO" != "true" ]; then \
+        for extension in quantile trimmed_aggregates; do \
+            pgxn install $extension \
+            && strip /usr/lib/postgresql/$version/lib/$extension.so; \
+        done \
 
-            # Install PostgreSQL binaries, contrib, plproxy and multiple pl's
-            && apt-get install --allow-downgrades -y postgresql-contrib-${version} \
-                        postgresql-plpython3-${version} libpq5=$version* $EXTRAS \
-                        libpq-dev=$version* postgresql-server-dev-${version} \
+        && if [ "$version" = "9.6" ] || [ "$version" = "10" ]; then \
+            cd timescaledb \
+            && rm -fr build \
+            && ./bootstrap \
+            && make -C build install \
+            && strip /usr/lib/postgresql/$version/lib/timescaledb*.so \
+            && cd ..; \
+        fi \
 
-            # Install 3rd party stuff
-            && if [ "$DEMO" != "true" ]; then \
-                for extension in quantile trimmed_aggregates; do \
-                    pgxn install $extension \
-                    && strip /usr/lib/postgresql/$version/lib/$extension.so; \
-                done \
+        # # Install pg_rewind on 9.3 and 9.4
+        # && if [ "$version" = "9.3" ] || [ "$version" = "9.4" ]; then \
+        #     REWIND_VER=REL$(echo $version | sed 's/\./_/')_STABLE \
+        #     && apt-get source postgresql-${version} \
+        #     && curl -sL https://github.com/vmware/pg_rewind/archive/${REWIND_VER}.tar.gz | tar xz \
+        #     && make -C pg_rewind-${REWIND_VER} USE_PGXS=1 top_srcdir=../$(ls -d postgresql-${version}-*) install-strip \
+        #     && rm -fr pg_rewind-${REWIND_VER} postgresql-${version}*; \
+        # fi \
 
-                && if [ "$version" = "9.6" ] || [ "$version" = "10" ]; then \
-                    cd timescaledb \
-                    && rm -fr build \
-                    && ./bootstrap \
-                    && make -C build install \
-                    && strip /usr/lib/postgresql/$version/lib/timescaledb*.so \
-                    && cd ..; \
-                fi \
+        && EXTRA_EXTENSIONS="plpgsql_check plprofiler plantuner postgres-decoderbufs-$DECODERBUFS_COMMIT"; \
+    fi \
 
-                # Install pg_rewind on 9.3 and 9.4
-                && if [ "$version" = "9.3" ] || [ "$version" = "9.4" ]; then \
-                    REWIND_VER=REL$(echo $version | sed 's/\./_/')_STABLE \
-                    && apt-get source postgresql-${version} \
-                    && curl -sL https://github.com/vmware/pg_rewind/archive/${REWIND_VER}.tar.gz | tar xz \
-                    && make -C pg_rewind-${REWIND_VER} USE_PGXS=1 top_srcdir=../$(ls -d postgresql-${version}-*) install-strip \
-                    && rm -fr pg_rewind-${REWIND_VER} postgresql-${version}*; \
-                fi \
-
-                && EXTRA_EXTENSIONS="plpgsql_check plprofiler plantuner" \
-                && if [ "$version" != "9.3" ]; then \
-                    EXTRA_EXTENSIONS="$EXTRA_EXTENSIONS postgres-decoderbufs-$DECODERBUFS_COMMIT"; \
-                fi; \
-            fi \
-
-            && for n in bg_mon-${BG_MON_COMMIT} set_user $EXTRA_EXTENSIONS; do \
-                make -C $n USE_PGXS=1 clean install-strip; \
-            done \
-
-            && apt-get purge -y libpq-dev=$version*; \
+    && for n in bg_mon-${BG_MON_COMMIT} set_user $EXTRA_EXTENSIONS; do \
+        make -C $n USE_PGXS=1 clean install-strip; \
     done \
+
+    && apt-get purge -y libpq-dev=$version* \
 
     && apt-get install -y skytools3-ticker pspg \
 
@@ -227,10 +221,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         && pg_buildext updatecontrol \
         && debuild -b -uc -us \
         && cd .. \
-        && for version in ${PGOLDVERSIONS} ${PGVERSION}; do \
-            for deb in postgresql-${version}-${pkg}_*.deb; do \
-                if [ -f $deb ]; then dpkg -i $deb; fi; \
-            done; \
+        && for deb in postgresql-${version}-${pkg}_*.deb; do \
+            if [ -f $deb ]; then dpkg -i $deb; fi; \
         done; \
     done \
 
@@ -289,17 +281,17 @@ RUN export DEBIAN_FRONTEND=noninteractive \
             done; \
         done \
 
-        && cd /usr/share/postgresql/9.5/extension \
-        && for f in *.sql *.control; do \
-            for v in 9.3 9.4; do \
-                if [ -f /usr/share/postgresql/$v/extension/$f ] \
-                        && [ ! -L /usr/share/postgresql/$v/extension/$f ] \
-                        && diff $v/extension/$f $f > /dev/null; then \
-                    rm /usr/share/postgresql/$v/extension/$f \
-                    && ln -s /usr/share/postgresql/9.5/extension/$f /usr/share/postgresql/$v/extension/$f; \
-                fi; \
-            done; \
-        done \
+        # && cd /usr/share/postgresql/9.5/extension \
+        # && for f in *.sql *.control; do \
+        #     for v in 9.3 9.4; do \
+        #         if [ -f /usr/share/postgresql/$v/extension/$f ] \
+        #                 && [ ! -L /usr/share/postgresql/$v/extension/$f ] \
+        #                 && diff $v/extension/$f $f > /dev/null; then \
+        #             rm /usr/share/postgresql/$v/extension/$f \
+        #             && ln -s /usr/share/postgresql/9.5/extension/$f /usr/share/postgresql/$v/extension/$f; \
+        #         fi; \
+        #     done; \
+        # done \
 
         && cd /usr/share/postgresql/$PGVERSION/contrib \
         && for f in *.sql *.html; do \
@@ -321,18 +313,18 @@ RUN export DEBIAN_FRONTEND=noninteractive \
             done; \
         done \
 
-        && cd /usr/share/postgresql/9.5/contrib/postgis-$POSTGIS_VERSION \
-        && for f in *.sql *.pl; do \
-            for v in 9.3 9.4; do \
-                if [ -f /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f ] \
-                        && [ ! -L /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f ] \
-                        && diff /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f $f > /dev/null; then \
-                    rm /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f \
-                    && ln -s /usr/share/postgresql/9.5/contrib/postgis-$POSTGIS_VERSION/$f \
-                            /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f; \
-                fi; \
-            done; \
-        done \
+        # && cd /usr/share/postgresql/9.5/contrib/postgis-$POSTGIS_VERSION \
+        # && for f in *.sql *.pl; do \
+        #     for v in 9.3 9.4; do \
+        #         if [ -f /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f ] \
+        #                 && [ ! -L /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f ] \
+        #                 && diff /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f $f > /dev/null; then \
+        #             rm /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f \
+        #             && ln -s /usr/share/postgresql/9.5/contrib/postgis-$POSTGIS_VERSION/$f \
+        #                     /usr/share/postgresql/$v/contrib/postgis-$POSTGIS_VERSION/$f; \
+        #         fi; \
+        #     done; \
+        # done \
 
         && cd /usr/lib/postgresql/$PGVERSION/bin \
         && for u in clusterdb pg_archivecleanup pg_basebackup pg_isready pg_test_fsync pg_test_timing pgbench psql reindexdb vacuumdb vacuumlo *.py; do \
@@ -367,28 +359,27 @@ RUN export DEBIAN_FRONTEND=noninteractive \
             /usr/lib/postgresql/*/bin/pg_standby \
             /usr/lib/postgresql/*/bin/pltcl_*
 
-# Install patroni and WAL-e
-ENV PATRONIVERSION=1.4.5
-ENV WALE_VERSION=1.1.0
-RUN export DEBIAN_FRONTEND=noninteractive \
+
+
+RUN echo "Install patroni and WAL-e" \
+    && export DEBIAN_FRONTEND=noninteractive \
     && set -ex \
+    && apt-get -qq update \
     && BUILD_PACKAGES="python3-pip python3-wheel python3-dev git patchutils" \
-    && apt-get update \
 
     # install most of the patroni dependencies from ubuntu packages
     && apt-get install -s patroni \
             | sed -n -e "/^Inst patroni /d" \
                     -e 's/^Inst \([^ ]\+\) .*$/\1/p' \
             | xargs apt-get install -y ${BUILD_PACKAGES} \
-					python3-pystache python3-cachetools \
-					python3-rsa python3-pyasn1-modules \
+                    python3-pystache python3-cachetools \
+                    python3-rsa python3-pyasn1-modules \
 
     && pip3 install setuptools \
 
     && if [ "$DEMO" != "true" ]; then \
-        EXTRAS=",etcd,consul,zookeeper,aws" \
-        && apt-get install -y python3-etcd python3-consul python3-kazoo python3-meld3 \
-			python3-boto python3-gevent python3-greenlet python3-protobuf \
+        apt-get install -y python3-etcd python3-consul python3-kazoo python3-meld3 \
+            python3-boto python3-gevent python3-greenlet python3-protobuf \
         && pip3 install envdir wal-e[aws,google]==$WALE_VERSION \
                 'git+https://github.com/Supervisor/supervisor.git@master#egg=supervisor' \
                 'git+https://github.com/zalando/pg_view.git@master#egg=pg-view' \
@@ -410,7 +401,9 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 
         && echo 4.0.0.dev0 > supervisor/version.txt; \
     fi \
-    && pip3 install "git+https://github.com/zalando/patroni.git@4128cba6286a2cd394edbe59c321bf4f555abc66#egg=patroni[kubernetes$EXTRAS]" \
+    && EXTRAS=",etcd,consul,zookeeper,aws" \
+    ## Install patroni, with commit revision "1de7c78c04dab9882f6113815d377e6f3490d5dd"
+    && pip3 install "git+https://github.com/zalando/patroni.git@1de7c78c04dab9882f6113815d377e6f3490d5dd#egg=patroni[kubernetes$EXTRAS]" \
 
     && for d in /usr/lib/python3 /usr/local/lib/python3.6; do \
         cd $d/dist-packages \
