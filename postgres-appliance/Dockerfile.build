@@ -30,9 +30,9 @@ RUN echo "Prepare all installations and OS configurations..." \
     && set -ex \
     && echo 'APT::Install-Recommends "0";' > /etc/apt/apt.conf.d/01norecommend \
     && echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/01norecommend \
-    && apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y curl ca-certificates less locales jq vim-tiny gnupg1 \
+    && apt-get update -qq \
+    && apt-get upgrade -y -qq \
+    && apt-get install -y -qq curl ca-certificates less locales jq vim-tiny gnupg1 \
 
     && echo "Add PGDG repositories" \
     && DISTRIB_CODENAME=$(sed -n 's/DISTRIB_CODENAME=//p' /etc/lsb-release) \
@@ -47,7 +47,7 @@ RUN echo "Prepare all installations and OS configurations..." \
 
     && if [ "$DEMO" != "true" ]; then \
         echo "Installing cron, (pv, lzop, which are required for wal-e.)" \
-        && apt-get install -qq -y cron \
+        && apt-get install -y -qq cron \
                 # Required for wal-e
                 pv lzop \
 
@@ -57,8 +57,8 @@ RUN echo "Prepare all installations and OS configurations..." \
                 | tar xz -C /bin --strip=1 --wildcards --no-anchored etcdctl etcd; \
     fi \
 
-    && apt-get update \
-    && apt-get install -y postgresql-common \
+    && apt-get update -qq \
+    && apt-get install -qq -y postgresql-common \
 
     && echo "forbid creation of a main cluster when package is installed" \
     && sed -ri 's/#(create_main_cluster) .*$/\1 = false/' /etc/postgresql-common/createcluster.conf \
@@ -86,7 +86,7 @@ RUN echo "Install postgresql, extentions and contribs..." \
 
     && BUILD_PACKAGES="devscripts build-essential fakeroot debhelper git gcc libc6-dev make libevent-dev" \
     && if [ "$DEMO" = "true" ]; then \
-        apt-get install -y $BUILD_PACKAGES; \
+        apt-get install -y -qq $BUILD_PACKAGES; \
     else \
         BUILD_PACKAGES="$BUILD_PACKAGES equivs pgxnclient cmake libssl-dev zlib1g-dev libprotobuf-c-dev liblwgeom-dev libproj-dev libxslt1-dev libxml2-dev libpam0g-dev libkrb5-dev libedit-dev libselinux1-dev libcurl4-openssl-dev libc-ares-dev python-docutils flex bison asciidoc liblua5.1-dev libv8-dev markdown" \
 # debezium-decoderbufs: libprotobuf-c-dev liblwgeom-dev libproj-dev
@@ -102,11 +102,11 @@ RUN echo "Install postgresql, extentions and contribs..." \
             && equivs-build perl; \
         fi \
 
-        && dpkg -i *.deb || apt-get -y -f install \
+        && dpkg -i *.deb || apt-get -y -f -qq install \
 
         # install pam_oauth2.so
         && git clone -b $PAM_OAUTH2 --recurse-submodules https://github.com/CyberDem0n/pam-oauth2.git \
-        && make -C pam-oauth2 install \
+        && make -s -C pam-oauth2 install \
 
         # prepare 3rd sources
         && curl -sL https://github.com/debezium/postgres-decoderbufs/archive/$DECODERBUFS_COMMIT.tar.gz | tar xz \
@@ -124,7 +124,7 @@ RUN echo "Install postgresql, extentions and contribs..." \
 
     && git clone -b $SET_USER https://github.com/pgaudit/set_user.git \
 
-    && apt-get install -y libevent-2.1 libevent-pthreads-2.1 python3.6 \
+    && apt-get install -y -qq libevent-2.1 libevent-pthreads-2.1 python3.6 \
 
     && version=${PGVERSION} \
     && EXTRAS="postgresql-${version}-cron" \
@@ -149,7 +149,7 @@ RUN echo "Install postgresql, extentions and contribs..." \
     fi \
 
     && echo "Install PostgreSQL binaries, contrib, plproxy and multiple pl's" \
-    && apt-get install --allow-downgrades -y postgresql-contrib-${version} \
+    && apt-get install --allow-downgrades -y -qq postgresql-contrib-${version} \
                 postgresql-plpython3-${version} libpq5=$version* $EXTRAS \
                 libpq-dev=$version* postgresql-server-dev-${version} \
 
@@ -164,7 +164,7 @@ RUN echo "Install postgresql, extentions and contribs..." \
             cd timescaledb \
             && rm -fr build \
             && ./bootstrap \
-            && make -C build install \
+            && make -s -C build install \
             && strip /usr/lib/postgresql/$version/lib/timescaledb*.so \
             && cd ..; \
         fi \
@@ -182,12 +182,12 @@ RUN echo "Install postgresql, extentions and contribs..." \
     fi \
 
     && for n in bg_mon-${BG_MON_COMMIT} set_user $EXTRA_EXTENSIONS; do \
-        make -C $n USE_PGXS=1 clean install-strip; \
+        make -s -C $n USE_PGXS=1 clean install-strip; \
     done \
 
-    && apt-get purge -y libpq-dev=$version* \
+    && apt-get purge -y -qq libpq-dev=$version* \
 
-    && apt-get install -y skytools3-ticker pspg \
+    && apt-get install -y -qq skytools3-ticker pspg \
 
     && if [ "$DEMO" != "true" ]; then \
         # patch, build and install pgbouncer
@@ -205,7 +205,7 @@ RUN echo "Install postgresql, extentions and contribs..." \
     fi \
 
     # build and install missing packages
-    && apt-get install -y postgresql-server-dev-all \
+    && apt-get install -y -qq postgresql-server-dev-all \
     && for pkg in pgextwlist $PACKAGES; do \
         apt-get source postgresql-10-${pkg} \
         && cd $(ls -d *${pkg}-*) \
@@ -227,10 +227,10 @@ RUN echo "Install postgresql, extentions and contribs..." \
     done \
 
     # Clean up
-    && apt-get purge -y ${BUILD_PACKAGES} postgresql-server-dev-* libmagic1 bsdmainutils \
-    && apt-get autoremove -y \
+    && apt-get purge -y -qq ${BUILD_PACKAGES} postgresql-server-dev-* libmagic1 bsdmainutils \
+    && apt-get autoremove -y -qq \
 
-    && apt-get clean \
+    && apt-get clean -qq \
     && dpkg -l | grep '^rc' | awk '{print $2}' | xargs apt-get purge -y \
 
     && if [ "$DEMO" != "true" ]; then \
@@ -371,14 +371,14 @@ RUN echo "Install patroni and WAL-e" \
     && apt-get install -s patroni \
             | sed -n -e "/^Inst patroni /d" \
                     -e 's/^Inst \([^ ]\+\) .*$/\1/p' \
-            | xargs apt-get install -y ${BUILD_PACKAGES} \
+            | xargs apt-get install -y -qq ${BUILD_PACKAGES} \
                     python3-pystache python3-cachetools \
                     python3-rsa python3-pyasn1-modules \
 
     && pip3 install setuptools \
 
     && if [ "$DEMO" != "true" ]; then \
-        apt-get install -y python3-etcd python3-consul python3-kazoo python3-meld3 \
+        apt-get install -y -qq python3-etcd python3-consul python3-kazoo python3-meld3 \
             python3-boto python3-gevent python3-greenlet python3-protobuf \
         && pip3 install envdir wal-e[aws,google]==$WALE_VERSION \
                 'git+https://github.com/Supervisor/supervisor.git@master#egg=supervisor' \
@@ -417,9 +417,9 @@ RUN echo "Install patroni and WAL-e" \
     && find . -type f -name '*_test.cpython*.pyc' -delete \
 
     # Clean up
-    && apt-get purge -y ${BUILD_PACKAGES} \
-    && apt-get autoremove -y \
-    && apt-get clean \
+    && apt-get purge -y -qq ${BUILD_PACKAGES} \
+    && apt-get autoremove -y -qq \
+    && apt-get clean -qq \
     && rm -rf /var/lib/apt/lists/* \
             /var/cache/debconf/* \
             /root/.cache \
@@ -435,9 +435,9 @@ ARG COMPRESS=false
 
 RUN set -ex \
     && if [ "$COMPRESS" = "true" ]; then \
-        apt-get update \
-        && apt-get install -y busybox xz-utils \
-        && apt-get clean \
+        apt-get update -qq \
+        && apt-get install -y -qq busybox xz-utils \
+        && apt-get clean -qq \
         && rm -rf /var/lib/apt/lists/* /var/cache/debconf/* /usr/share/doc /usr/share/man /etc/rc?.d /etc/systemd \
         && ln -snf busybox /bin/sh \
         && files="/bin/sh" \

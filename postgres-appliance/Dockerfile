@@ -1,5 +1,4 @@
-#FROM spilo:squashed
-FROM spilo-build-demo:0.1
+FROM spilo:squashed
 
 MAINTAINER LeapDevOps <leapdevops@opentext.com>
 

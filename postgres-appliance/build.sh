@@ -25,17 +25,14 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-IMGBUILD="$NAME-build:$VERSION"
-IMG="$NAME:$VERSION"
-
+readonly DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+[ -z $NAME ] && NAME=spilo
+[ -z $VERSION ] && VERSION=0.1 ## Do NOT user "lastest" as version
+readonly NAME_BUILD="$NAME-build"
 x_build_args="${build_args[@]}"
 x_final_args="${final_args[@]}"
 [ $DEBUG == "true" ] && x_build_args="$x_build_args --build-arg DEBUG=true" \
 && x_final_args="$x_final_args --build-arg DEBUG=true"
-
-echo "$DEBUG" "$x_build_args" "$x_final_args"
 
 readonly REV=$(git rev-parse HEAD)
 readonly URL=$(git config --get remote.origin.url)
@@ -60,25 +57,17 @@ function run_or_fail() {
     fi
 }
 
-readonly OLD_BUILD_ID=$(docker images -q $IMGBUILD)
+[ ! -z $(docker images -q $NAME_BUILD:$VERSION) ] \
+    && echo "The image $NAME_BUILD:$VERSION is existed already, change value for \"-v\" and try again." \
+    && exit 1
+[ ! -z $(docker images -q $NAME-squashed:$VERSION) ] \
+    && echo "The image $NAME-squashed:$VERSION is existed already, change value for \"-v\" and try again." \
+    && exit 1
 
-# function squash_new_image() {
-#     local NEW_BUILD_ID=$(docker images -q $IMAGE_BASE)
-#     local TAG_OF=$(docker images --format "{{.ID}} {{.Repository}}:{{.Tag}}" \
-#             | grep "^$NEW_BUILD_ID " | grep -v "^$NEW_BUILD_ID $IMAGE_BASE" \
-#             | awk '{print $2; exit 0}')
+run_or_fail docker build $x_build_args -t $NAME_BUILD:$VERSION -f $DIR/Dockerfile.build $DIR
 
-#     # new "-build" image has the same id as already exiting one
-#     [[ ! -z $TAG_OF ]] && docker tag ${TAG_OF%-build}-squashed $IMGNAME-squashed && return 0
+run_or_fail docker-squash -t $NAME-squashed:$VERSION $NAME_BUILD:$VERSION
 
-#     [[ "$OLD_BUILD_ID" != "$NEW_BUILD_ID" || -z "$(docker images -q $IMGNAME-squashed)" ]] \
-#             && run_or_fail docker-squash -t $IMGNAME-squashed $IMGNAME-build
-# }
-
-run_or_fail docker build $x_build_args -t $IMGBUILD -f $DIR/Dockerfile.build $DIR
-
-# squash_new_image
-
-# run_or_fail docker tag $IMGNAME-build spilo-base:squashed
+run_or_fail docker tag $NAME-squashed:$VERSION spilo-base:squashed
 
 run_or_fail docker build $x_final_args -t $IMG -f $DIR/Dockerfile $DIR
