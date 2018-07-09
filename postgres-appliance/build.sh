@@ -70,4 +70,4 @@ run_or_fail docker-squash -t $NAME-squashed:$VERSION $NAME_BUILD:$VERSION
 
 run_or_fail docker tag $NAME-squashed:$VERSION spilo-base:squashed
 
-run_or_fail docker build $x_final_args -t $IMG -f $DIR/Dockerfile $DIR
+run_or_fail docker build $x_final_args -t $NAME:$VERSION -f $DIR/Dockerfile $DIR
